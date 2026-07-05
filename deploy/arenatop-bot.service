@@ -1,0 +1,21 @@
+[Unit]
+Description=ArenaTop Admin Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ArenaTopAdminPanelBot
+Environment=PATH=/opt/ArenaTopAdminPanelBot/.venv/bin:/usr/bin
+ExecStart=/opt/ArenaTopAdminPanelBot/.venv/bin/python -u main.py
+Restart=always
+RestartSec=10
+
+# Loglar
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=arenatop-bot
+
+[Install]
+WantedBy=multi-user.target

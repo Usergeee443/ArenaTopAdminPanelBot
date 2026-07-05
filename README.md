@@ -111,3 +111,57 @@ Autentifikatsiya: telefon orqali OTP login (avtomatik)
 ## Eslatma
 
 Bot birinchi marta ishga tushganda mavjud so'rovlarni "ko'rilgan" deb belgilaydi — shunda eski so'rovlar qayta yuborilmaydi. Keyin faqat **yangi** so'rovlar haqida xabar beriladi.
+
+## Serverga o'rnatish (doimiy ishlashi uchun)
+
+Bot **systemd** xizmati sifatida ishlaydi — server qayta yuklansa ham avtomatik ishga tushadi.
+
+### 1. To'g'ri klon qiling
+
+```bash
+sudo rm -rf /opt/ArenaTopAdminPanelBot
+sudo git clone https://github.com/Usergeee443/ArenaTopAdminPanelBot.git /opt/ArenaTopAdminPanelBot
+cd /opt/ArenaTopAdminPanelBot
+```
+
+> **Muhim:** `git clone` ni to'g'ridan-to'g'ri `/opt/ArenaTopAdminPanelBot` ga qiling. Ichma-ich papka bo'lmasin.
+
+### 2. `.env` sozlang
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+### 3. O'rnatish skripti
+
+```bash
+chmod +x deploy/install.sh
+sudo ./deploy/install.sh
+```
+
+### 4. Foydali buyruqlar
+
+```bash
+# Holat
+sudo systemctl status arenatop-bot
+
+# Loglar (jonli)
+sudo journalctl -u arenatop-bot -f
+
+# Qayta ishga tushirish
+sudo systemctl restart arenatop-bot
+
+# To'xtatish
+sudo systemctl stop arenatop-bot
+```
+
+### Kod yangilanganda
+
+```bash
+cd /opt/ArenaTopAdminPanelBot
+git pull
+source .venv/bin/activate
+pip install -r requirements.txt
+sudo systemctl restart arenatop-bot
+```
