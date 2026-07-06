@@ -102,13 +102,13 @@ def build_application(
         )
     )
     application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, otp_message_handler)
-    )
-    application.add_handler(
         MessageHandler(
             (filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND,
             receipt_handler,
         )
+    )
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, otp_message_handler)
     )
 
     return application

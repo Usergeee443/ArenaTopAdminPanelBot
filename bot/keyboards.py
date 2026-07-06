@@ -90,7 +90,7 @@ def refresh_keyboard(callback_data: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("🔄 Yangilash", callback_data=callback_data)],
-            *back_button(),
+            back_button(),
         ]
     )
 

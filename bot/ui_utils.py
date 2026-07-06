@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from bot.api_client import ArenaTopClient
 from bot.config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 def is_admin(user_id: int | None, settings: Settings) -> bool:
@@ -30,17 +35,38 @@ async def send_message(
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
-    if keyboard is not None:
-        kwargs["reply_markup"] = keyboard
-    if reply_keyboard is not None:
-        kwargs["reply_markup"] = reply_keyboard
 
     if update.callback_query:
         await update.callback_query.answer()
-        try:
-            await update.callback_query.edit_message_text(text, **kwargs)
-        except Exception:
+
+        # Reply keyboard faqat yangi xabar bilan yuboriladi
+        if reply_keyboard is not None:
+            kwargs["reply_markup"] = reply_keyboard
             if update.callback_query.message:
                 await update.callback_query.message.reply_text(text, **kwargs)
-    elif update.message:
+            return
+
+        if keyboard is not None:
+            kwargs["reply_markup"] = keyboard
+
+        if not update.callback_query.message:
+            return
+
+        try:
+            await update.callback_query.edit_message_text(text, **kwargs)
+        except BadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                return
+            logger.warning("Edit failed, sending new message: %s", exc)
+            await update.callback_query.message.reply_text(text, **kwargs)
+        except Exception:
+            logger.exception("Callback message send failed")
+            await update.callback_query.message.reply_text(text, **kwargs)
+        return
+
+    if update.message:
+        if reply_keyboard is not None:
+            kwargs["reply_markup"] = reply_keyboard
+        elif keyboard is not None:
+            kwargs["reply_markup"] = keyboard
         await update.message.reply_text(text, **kwargs)

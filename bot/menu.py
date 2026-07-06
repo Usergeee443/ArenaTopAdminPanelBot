@@ -320,14 +320,21 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     data = update.callback_query.data if update.callback_query else ""
-    if await process_callback_handler(update, context, data):
-        return
+    logger.info("Callback: %s", data)
 
-    handler = CALLBACK_ROUTES.get(data)
-    if handler:
-        await handler(update, context)
-    elif update.callback_query:
-        await update.callback_query.answer()
+    try:
+        if await process_callback_handler(update, context, data):
+            return
+
+        handler = CALLBACK_ROUTES.get(data)
+        if handler:
+            await handler(update, context)
+        elif update.callback_query:
+            await update.callback_query.answer("Noma'lum buyruq", show_alert=True)
+    except Exception:
+        logger.exception("Callback handler error for %s", data)
+        if update.callback_query:
+            await update.callback_query.answer("Xatolik yuz berdi", show_alert=True)
 
 
 async def menu_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
