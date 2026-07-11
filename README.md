@@ -67,22 +67,19 @@ python main.py
 
 ## Login (telefon orqali)
 
-Bot ishga tushganda `ARENATOP_PHONE` raqamiga SMS kod yuboradi. Admin Telegram botga kodni yuboradi va token avtomatik saqlanadi.
+Har bir moderator o'z telefon raqami bilan kiradi:
+
+1. `/start` yoki `/login`
+2. Telefon raqamini yuboradi (masalan: `917079732`)
+3. SMS kelgan kodni yuboradi
+4. Token shu Telegram foydalanuvchi uchun saqlanadi
 
 | O'zgaruvchi | Tavsif |
 |---|---|
-| `ARENATOP_PHONE` | ArenaTop admin telefon raqami (masalan: `917079732`) |
+| `ADMIN_TELEGRAM_IDS` | Ixtiyoriy ruxsatlar ro'yxati. Bo'sh bo'lsa — OTP orqali kirgan har qanday moderator ishlata oladi |
 | `ARENATOP_API_TOKEN` | Ixtiyoriy statik token (bo'lsa, SMS login o'tkazib yuboriladi) |
 
-### Login jarayoni
-
-1. Bot ishga tushadi
-2. Saqlangan token yo'q bo'lsa, SMS kod yuboriladi
-3. Admin kodni botga yuboradi (masalan: `123456`)
-4. Token `data/auth_session.json` ga saqlanadi
-5. Keyingi ishga tushirishlarda qayta login shart emas
-
-Qayta login uchun: `/login`
+Qayta login: `/login` yoki Sozlamalar → Qayta login
 
 ## API endpointlar
 

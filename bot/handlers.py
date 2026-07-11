@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-
 import re
 
 from telegram.ext import (
@@ -16,9 +15,9 @@ from telegram.ext import (
 
 from bot.api_client import ArenaTopClient
 from bot.auth import AuthService, OTPRequired
+from bot.bootstrap import bootstrap_notifier
 from bot.config import Settings
 from bot.keyboards import MENU_BUTTONS
-from bot.bootstrap import bootstrap_notifier
 from bot.login_flow import begin_login
 from bot.menu import (
     callback_handler,
@@ -30,8 +29,9 @@ from bot.menu import (
     show_main_menu,
     show_payments_menu,
 )
-from bot.process_flow import has_pending, submit_receipt
 from bot.notifier import PaymentNotifier
+from bot.process_flow import has_pending, submit_receipt
+from bot.ui_utils import can_access_bot, is_logged_in
 
 logger = logging.getLogger(__name__)
 
@@ -42,30 +42,37 @@ async def startup_flow(application: Application) -> None:
     try:
         await auth.ensure_access_token()
         await bootstrap_notifier(application)
-        return
+        logger.info("Notifier started with existing session(s).")
     except OTPRequired:
-        logger.info("Valid API token not found. Starting phone login...")
+        logger.info(
+            "No API session yet. Moderators must /login with their phone number."
+        )
         await begin_login(application)
     except Exception:
         logger.exception("Startup auth failed")
 
 
 async def post_init(application: Application) -> None:
-    print("Bot tayyor. ArenaTop API ga ulanish boshlandi...", flush=True)
+    print("Bot tayyor. Moderatorlar /login orqali kirishi mumkin.", flush=True)
     asyncio.create_task(startup_flow(application))
 
 
 async def start_command(update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings: Settings = context.application.bot_data["settings"]
     user = update.effective_user
-    if user and user.id not in settings.admin_telegram_ids:
+    if not can_access_bot(user.id if user else None, settings):
         if update.message:
             await update.message.reply_text(
-                "Bu bot faqat ArenaTop adminlari uchun.\n"
-                f"Sizning Telegram ID: {user.id}"
+                "Bu bot faqat ArenaTop moderatorlari uchun.\n"
+                f"Sizning Telegram ID: {user.id if user else '—'}"
             )
         return
-    await show_main_menu(update, context)
+
+    if user and is_logged_in(user.id, context):
+        await show_main_menu(update, context)
+        return
+
+    await handle_login(update, context)
 
 
 def build_application(
@@ -117,7 +124,9 @@ def build_application(
 async def receipt_handler(update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings: Settings = context.application.bot_data["settings"]
     user = update.effective_user
-    if not user or user.id not in settings.admin_telegram_ids:
+    if not can_access_bot(user.id if user else None, settings):
+        return
+    if not user or not is_logged_in(user.id, context):
         return
     if has_pending(context):
         await submit_receipt(update, context)

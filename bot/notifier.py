@@ -68,7 +68,12 @@ class PaymentNotifier:
         text: str,
         reply_markup=None,
     ) -> None:
-        for admin_id in self._settings.admin_telegram_ids:
+        auth = application.bot_data.get("auth")
+        recipients = set(self._settings.admin_telegram_ids)
+        if auth is not None:
+            recipients.update(auth.logged_in_telegram_ids())
+
+        for admin_id in recipients:
             try:
                 await application.bot.send_message(
                     chat_id=admin_id,

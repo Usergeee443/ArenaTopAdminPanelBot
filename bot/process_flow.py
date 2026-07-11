@@ -15,7 +15,7 @@ from bot.keyboards import (
     refresh_keyboard,
     withdrawal_actions_keyboard,
 )
-from bot.ui_utils import get_api, send_message
+from bot.ui_utils import bind_user, get_api, send_message
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +306,10 @@ async def cancel_process(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def process_callback_handler(
     update: Update, context: ContextTypes.DEFAULT_TYPE, data: str
 ) -> bool:
+    user = update.effective_user
+    if user:
+        bind_user(context, user.id)
+
     if data == "process:cancel":
         await cancel_process(update, context)
         return True

@@ -47,85 +47,142 @@ def format_phone_display(phone: str) -> str:
     return phone
 
 
+def looks_like_phone(raw: str) -> bool:
+    digits = re.sub(r"\D", "", raw.strip())
+    return len(digits) in (9, 12) or (digits.startswith("998") and len(digits) >= 9)
+
+
 @dataclass
 class AuthSession:
     access_token: str
     refresh_token: str | None = None
     phone_number: str | None = None
+    telegram_id: int | None = None
     saved_at: str | None = None
 
 
 class AuthService:
+    """Per-Telegram-user ArenaTop sessions with interactive phone OTP login."""
+
     VERIFY_ENDPOINT = "/auth/login/otp"
     REFRESH_ENDPOINT = "/auth/refresh"
 
     def __init__(
         self,
         base_url: str,
-        phone_number: str,
         storage_path: str,
         static_token: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
-        self._phone_number = normalize_phone(phone_number)
         self._storage_path = Path(storage_path)
         self._static_token = static_token.strip() if static_token else None
-        self._session: AuthSession | None = None
-        self._awaiting_otp = False
+        # telegram_id -> AuthSession
+        self._sessions: dict[str, AuthSession] = {}
         self._load()
 
-    @property
-    def phone_number(self) -> str:
-        return self._phone_number
+    def _key(self, telegram_id: int) -> str:
+        return str(telegram_id)
 
-    @property
-    def awaiting_otp(self) -> bool:
-        return self._awaiting_otp
+    def is_logged_in(self, telegram_id: int) -> bool:
+        if self._static_token:
+            return True
+        return self._key(telegram_id) in self._sessions
 
-    def get_access_token(self) -> str | None:
+    def get_session(self, telegram_id: int) -> AuthSession | None:
+        return self._sessions.get(self._key(telegram_id))
+
+    def logged_in_telegram_ids(self) -> list[int]:
+        return [int(key) for key in self._sessions.keys()]
+
+    def get_access_token(self, telegram_id: int | None = None) -> str | None:
         if self._static_token:
             return self._static_token
-        if self._session:
-            return self._session.access_token
+        if telegram_id is not None:
+            session = self.get_session(telegram_id)
+            return session.access_token if session else None
+        # Background jobs: any available session
+        for session in self._sessions.values():
+            return session.access_token
         return None
 
+    def phone_for(self, telegram_id: int) -> str | None:
+        session = self.get_session(telegram_id)
+        return session.phone_number if session else None
+
     def _load(self) -> None:
-        if self._static_token:
-            return
-        if not self._storage_path.exists():
+        if self._static_token or not self._storage_path.exists():
             return
         try:
             raw = json.loads(self._storage_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return
-        token = raw.get("access_token") or raw.get("token")
-        if not token:
-            return
-        self._session = AuthSession(
-            access_token=str(token),
-            refresh_token=raw.get("refresh_token"),
-            phone_number=raw.get("phone_number"),
-            saved_at=raw.get("saved_at"),
-        )
 
-    def _save(self, access_token: str, refresh_token: str | None = None) -> None:
+        # New format: {"sessions": {"123": {...}}}
+        sessions = raw.get("sessions")
+        if isinstance(sessions, dict):
+            for key, item in sessions.items():
+                if not isinstance(item, dict):
+                    continue
+                token = item.get("access_token") or item.get("token")
+                if not token:
+                    continue
+                self._sessions[str(key)] = AuthSession(
+                    access_token=str(token),
+                    refresh_token=item.get("refresh_token"),
+                    phone_number=item.get("phone_number"),
+                    telegram_id=int(key) if str(key).isdigit() else None,
+                    saved_at=item.get("saved_at"),
+                )
+            return
+
+        # Legacy single-session format
+        token = raw.get("access_token") or raw.get("token")
+        if token:
+            telegram_id = raw.get("telegram_id")
+            key = str(telegram_id) if telegram_id else "legacy"
+            self._sessions[key] = AuthSession(
+                access_token=str(token),
+                refresh_token=raw.get("refresh_token"),
+                phone_number=raw.get("phone_number"),
+                telegram_id=int(telegram_id) if telegram_id else None,
+                saved_at=raw.get("saved_at"),
+            )
+
+    def _save(self) -> None:
         payload = {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "phone_number": self._phone_number,
-            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "sessions": {
+                key: {
+                    "access_token": session.access_token,
+                    "refresh_token": session.refresh_token,
+                    "phone_number": session.phone_number,
+                    "telegram_id": session.telegram_id,
+                    "saved_at": session.saved_at,
+                }
+                for key, session in self._sessions.items()
+            }
         }
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._storage_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        self._session = AuthSession(
+
+    def _store_session(
+        self,
+        telegram_id: int,
+        access_token: str,
+        refresh_token: str | None,
+        phone_number: str,
+    ) -> None:
+        session = AuthSession(
             access_token=access_token,
             refresh_token=refresh_token,
-            phone_number=self._phone_number,
-            saved_at=payload["saved_at"],
+            phone_number=phone_number,
+            telegram_id=telegram_id,
+            saved_at=datetime.now(timezone.utc).isoformat(),
         )
+        self._sessions[self._key(telegram_id)] = session
+        self._save()
 
     @staticmethod
     def _extract_token(payload: Any) -> tuple[str | None, str | None]:
@@ -159,7 +216,7 @@ class AuthService:
 
     async def _post_json(self, path: str, body: dict[str, Any]) -> Any:
         url = f"{self._base_url}{path}"
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 url,
                 json=body,
@@ -175,8 +232,7 @@ class AuthService:
         return response.json()
 
     async def validate_token(self, token: str | None = None) -> bool:
-        access_token = token or self.get_access_token()
-        if not access_token:
+        if not token:
             return False
 
         url = f"{self._base_url}/users/me"
@@ -184,74 +240,119 @@ class AuthService:
             response = await client.get(
                 url,
                 headers={
-                    "Authorization": f"Bearer {access_token}",
+                    "Authorization": f"Bearer {token}",
                     "Accept": "application/json",
                 },
             )
         return response.status_code == 200
 
-    async def send_otp(self) -> str:
+    async def fetch_me(self, token: str) -> dict[str, Any]:
+        url = f"{self._base_url}/users/me"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/json",
+                },
+            )
+        if response.status_code >= 400:
+            raise AuthError("Profilni olishda xatolik")
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
+    async def send_otp(self, phone_number: str) -> str:
+        phone = normalize_phone(phone_number)
         payload = await self._post_json(
             "/auth/send-otp",
-            {"phone_number": self._phone_number},
+            {"phone_number": phone},
         )
-        self._awaiting_otp = True
-
         message = payload.get("message") if isinstance(payload, dict) else None
         if message:
             return str(message)
-        return f"SMS kod {format_phone_display(self._phone_number)} raqamiga yuborildi."
+        return f"SMS kod {format_phone_display(phone)} raqamiga yuborildi."
 
-    async def verify_otp(self, code: str) -> None:
+    async def verify_otp(
+        self, telegram_id: int, phone_number: str, code: str
+    ) -> AuthSession:
+        phone = normalize_phone(phone_number)
         code = code.strip()
         if not re.fullmatch(r"\d{4,6}", code):
             raise AuthError("Kod 4-6 ta raqamdan iborat bo'lishi kerak")
 
         payload = await self._post_json(
             self.VERIFY_ENDPOINT,
-            {"phone_number": self._phone_number, "otp_code": code},
+            {"phone_number": phone, "otp_code": code},
         )
 
         access_token, refresh_token = self._extract_token(payload)
         if not access_token:
             raise AuthError("OTP tasdiqlanmadi: token qaytmadi")
 
-        self._save(access_token, refresh_token)
-        self._awaiting_otp = False
+        me = await self.fetch_me(access_token)
+        if me.get("is_active") is False:
+            raise AuthError("Bu akkaunt nofaol")
 
-    async def refresh_access_token(self) -> bool:
-        if not self._session or not self._session.refresh_token:
+        self._store_session(telegram_id, access_token, refresh_token, phone)
+        session = self.get_session(telegram_id)
+        assert session is not None
+        return session
+
+    async def refresh_access_token(self, telegram_id: int) -> bool:
+        session = self.get_session(telegram_id)
+        if not session or not session.refresh_token:
             return False
 
         try:
             payload = await self._post_json(
                 self.REFRESH_ENDPOINT,
-                {"refresh_token": self._session.refresh_token},
+                {"refresh_token": session.refresh_token},
             )
         except AuthError as exc:
-            logger.warning("Token refresh failed: %s", exc)
+            logger.warning("Token refresh failed for %s: %s", telegram_id, exc)
             return False
 
         access_token, refresh_token = self._extract_token(payload)
         if access_token:
-            self._save(access_token, refresh_token or self._session.refresh_token)
+            self._store_session(
+                telegram_id,
+                access_token,
+                refresh_token or session.refresh_token,
+                session.phone_number or "",
+            )
             return True
         return False
 
-    async def ensure_access_token(self) -> str:
-        token = self.get_access_token()
-        if token and await self.validate_token(token):
-            return token
+    async def ensure_access_token(self, telegram_id: int | None = None) -> str:
+        if self._static_token:
+            return self._static_token
 
-        if await self.refresh_access_token():
-            token = self.get_access_token()
+        if telegram_id is not None:
+            token = self.get_access_token(telegram_id)
             if token and await self.validate_token(token):
                 return token
+            if await self.refresh_access_token(telegram_id):
+                token = self.get_access_token(telegram_id)
+                if token and await self.validate_token(token):
+                    return token
+            raise OTPRequired("Login qiling: /login")
 
-        raise OTPRequired("API token kerak. OTP kodni kiriting.")
+        # Background: try any session
+        for key in list(self._sessions.keys()):
+            tid = int(key) if key.isdigit() else None
+            if tid is None:
+                continue
+            try:
+                return await self.ensure_access_token(tid)
+            except OTPRequired:
+                continue
 
-    async def invalidate(self) -> None:
-        self._session = None
-        self._awaiting_otp = False
-        if self._storage_path.exists():
-            self._storage_path.unlink(missing_ok=True)
+        raise OTPRequired("Hech qaysi moderator login qilmagan.")
+
+    async def invalidate(self, telegram_id: int | None = None) -> None:
+        if telegram_id is None:
+            self._sessions.clear()
+            self._save()
+            return
+        self._sessions.pop(self._key(telegram_id), None)
+        self._save()

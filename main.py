@@ -34,7 +34,6 @@ def main() -> None:
 
     auth = AuthService(
         base_url=settings.api_base_url,
-        phone_number=settings.api_phone,
         storage_path=settings.auth_storage_path,
         static_token=settings.api_token,
     )
@@ -50,7 +49,7 @@ def main() -> None:
     print(
         "Bot ishlayapti. Terminal qotib qolgandek tuyulishi normal.\n"
         "To'xtatish uchun: Ctrl+C\n"
-        "SMS kod kelsa, botga yuboring.",
+        "Moderatorlar: /start → telefon → SMS kod.",
         flush=True,
     )
     application.run_polling(drop_pending_updates=True)

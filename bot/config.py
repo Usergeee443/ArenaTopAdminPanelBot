@@ -42,7 +42,6 @@ class Settings:
     telegram_bot_token: str
     admin_telegram_ids: list[int]
     api_base_url: str
-    api_phone: str
     api_token: str | None
     poll_interval_seconds: int
     refund_statuses: list[str]
@@ -56,11 +55,9 @@ class Settings:
         if not token:
             raise ValueError("TELEGRAM_BOT_TOKEN is required")
 
+        # Optional allowlist. Empty = any moderator who OTP-logs in can use the bot.
         admin_ids = _parse_int_list(os.getenv("ADMIN_TELEGRAM_IDS", ""))
-        if not admin_ids:
-            raise ValueError("ADMIN_TELEGRAM_IDS is required")
 
-        api_phone = os.getenv("ARENATOP_PHONE", "917079732").strip()
         api_token = os.getenv("ARENATOP_API_TOKEN", "").strip() or None
 
         base_url = os.getenv(
@@ -75,7 +72,6 @@ class Settings:
             telegram_bot_token=token,
             admin_telegram_ids=admin_ids,
             api_base_url=base_url,
-            api_phone=api_phone,
             api_token=api_token,
             poll_interval_seconds=poll_interval,
             refund_statuses=_parse_str_list(
@@ -86,6 +82,6 @@ class Settings:
             ),
             storage_path=os.getenv("STORAGE_PATH", "data/seen_requests.json"),
             auth_storage_path=os.getenv(
-                "AUTH_STORAGE_PATH", "data/auth_session.json"
+                "AUTH_STORAGE_PATH", "data/auth_sessions.json"
             ),
         )

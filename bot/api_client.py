@@ -18,13 +18,22 @@ class ArenaTopClient:
     REFUND_ENDPOINT = "/refund-requests"
     WITHDRAWAL_ENDPOINT = "/withdrawals"
 
-    def __init__(self, base_url: str, auth: AuthService) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        auth: AuthService,
+        telegram_id: int | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._auth = auth
+        self._telegram_id = telegram_id
+
+    def for_user(self, telegram_id: int | None) -> "ArenaTopClient":
+        return ArenaTopClient(self._base_url, self._auth, telegram_id)
 
     async def _auth_headers(self) -> dict[str, str]:
         try:
-            token = await self._auth.ensure_access_token()
+            token = await self._auth.ensure_access_token(self._telegram_id)
         except OTPRequired as exc:
             raise ArenaTopAPIError(str(exc), 401) from exc
 
@@ -41,7 +50,7 @@ class ArenaTopClient:
             response = await client.get(url, headers=headers, params=params)
 
         if response.status_code == 401:
-            await self._auth.invalidate()
+            await self._auth.invalidate(self._telegram_id)
             raise ArenaTopAPIError("API token noto'g'ri yoki muddati tugagan", 401)
         if response.status_code == 403:
             raise ArenaTopAPIError("API uchun ruxsat yo'q", 403)
@@ -199,7 +208,7 @@ class ArenaTopClient:
             )
 
         if response.status_code == 401:
-            await self._auth.invalidate()
+            await self._auth.invalidate(self._telegram_id)
             raise ArenaTopAPIError("API token noto'g'ri yoki muddati tugagan", 401)
         if response.status_code == 403:
             raise ArenaTopAPIError("API uchun ruxsat yo'q", 403)
@@ -222,7 +231,7 @@ class ArenaTopClient:
             response = await client.post(url, headers=headers, data=data)
 
         if response.status_code == 401:
-            await self._auth.invalidate()
+            await self._auth.invalidate(self._telegram_id)
             raise ArenaTopAPIError("API token noto'g'ri yoki muddati tugagan", 401)
         if response.status_code >= 400:
             detail = response.text.strip() or response.reason_phrase

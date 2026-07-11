@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import logging
-import re
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.api_client import ArenaTopAPIError
-from bot.auth import AuthError, AuthService
-from bot.config import Settings
+from bot.auth import format_phone_display
 from bot.keyboards import (
     BTN_BOOKINGS,
     BTN_COURTS,
@@ -24,7 +22,7 @@ from bot.keyboards import (
     settings_menu_keyboard,
     stats_menu_keyboard,
 )
-from bot.login_flow import begin_login
+from bot.login_flow import begin_login_for_user, handle_login_text, is_login_in_progress
 from bot.notifier import PaymentNotifier
 from bot.stats_formatters import (
     format_bookings_list,
@@ -47,7 +45,14 @@ BOOKING_TITLES = {
 }
 
 
-from bot.ui_utils import get_api, get_settings, is_admin, send_message
+from bot.ui_utils import (
+    get_api,
+    get_auth,
+    get_settings,
+    is_admin,
+    require_login,
+    send_message,
+)
 from bot.process_flow import (
     has_pending,
     process_callback_handler,
@@ -57,12 +62,16 @@ from bot.process_flow import (
 
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    auth: AuthService = context.application.bot_data["auth"]
-    login_hint = (
-        "🔐 Login: faol"
-        if not auth.awaiting_otp
-        else "🔐 Login: SMS kod kutilmoqda"
+    if not await require_login(update, context):
+        return
+
+    auth = get_auth(context)
+    user = update.effective_user
+    phone = auth.phone_for(user.id) if user else None
+    phone_line = (
+        f"📱 {format_phone_display(phone)}" if phone else "📱 Telefon: —"
     )
+
     await send_message(
         update,
         "\n".join(
@@ -70,7 +79,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 "🏠 <b>ArenaTop Admin Panel</b>",
                 "",
                 "Asosiy funksiya — pul so'rovlarini kuzatish.",
-                login_hint,
+                "🔐 Login: faol",
+                phone_line,
                 "",
                 "Quyidagi tugmalardan foydalaning 👇",
             ]
@@ -80,6 +90,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def show_payments_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     api = get_api(context)
     settings = get_settings(context)
     try:
@@ -93,6 +105,8 @@ async def show_payments_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def show_refunds(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     api = get_api(context)
     settings = get_settings(context)
     try:
@@ -103,6 +117,8 @@ async def show_refunds(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def show_withdrawals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     api = get_api(context)
     settings = get_settings(context)
     try:
@@ -113,6 +129,8 @@ async def show_withdrawals(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def show_all_payments(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     api = get_api(context)
     try:
         refunds = await api.get_refund_requests(None)
@@ -125,6 +143,8 @@ async def show_all_payments(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def check_payments(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     notifier: PaymentNotifier = context.application.bot_data["notifier"]
     try:
         result = await notifier.check_and_notify(context.application)
@@ -139,6 +159,8 @@ async def check_payments(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def show_stats_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     await send_message(
         update,
         "📊 <b>Statistika</b>\n\nKerakli bo'limni tanlang:",
@@ -147,6 +169,8 @@ async def show_stats_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def show_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     api = get_api(context)
     try:
         data = await api.get_dashboard_stats()
@@ -157,6 +181,8 @@ async def show_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def show_users_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     api = get_api(context)
     try:
         data = await api.get_users_summary()
@@ -167,6 +193,8 @@ async def show_users_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def show_today_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     api = get_api(context)
     try:
         data = await api.get_my_statistics()
@@ -177,6 +205,8 @@ async def show_today_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def show_bookings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     await send_message(
         update,
         "📋 <b>Bronlar</b>\n\nHolat bo'yicha tanlang:",
@@ -187,6 +217,8 @@ async def show_bookings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def show_bookings(
     update: Update, context: ContextTypes.DEFAULT_TYPE, status: str | None
 ) -> None:
+    if not await require_login(update, context):
+        return
     api = get_api(context)
     title = BOOKING_TITLES.get(status or "all", "📋 <b>Bronlar</b>")
     callback = f"book:{status or 'all'}"
@@ -199,6 +231,8 @@ async def show_bookings(
 
 
 async def show_courts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     api = get_api(context)
     try:
         items = await api.get_courts()
@@ -209,6 +243,8 @@ async def show_courts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     api = get_api(context)
     try:
         data = await api.get_me()
@@ -219,6 +255,8 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def show_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     await send_message(
         update,
         "⚙️ <b>Sozlamalar</b>",
@@ -227,20 +265,24 @@ async def show_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def show_bot_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_login(update, context):
+        return
     settings = get_settings(context)
     notifier: PaymentNotifier = context.application.bot_data["notifier"]
-    auth: AuthService = context.application.bot_data["auth"]
+    auth = get_auth(context)
+    user = update.effective_user
     counts = notifier.storage_counts()
-    token_state = "faol" if not auth.awaiting_otp else "SMS kod kutilmoqda"
+    phone = auth.phone_for(user.id) if user else None
+    phone_text = format_phone_display(phone) if phone else "—"
 
     text = "\n".join(
         [
             "🤖 <b>Bot holati</b>",
             "",
-            f"✅ Ishlayapti",
+            "✅ Ishlayapti",
             f"🌐 API: {settings.api_base_url}",
-            f"📱 Telefon: {settings.api_phone}",
-            f"🔐 Login: {token_state}",
+            f"📱 Telefon: {phone_text}",
+            "🔐 Login: faol",
             f"⏱ Tekshirish: har {settings.poll_interval_seconds} soniya",
             f"📨 Yuborilgan: {counts['refunds']} qaytarish, "
             f"{counts['withdrawals']} yechish",
@@ -258,6 +300,11 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "Bot asosan pul qaytarish va yechish so'rovlarini kuzatadi.",
             "Yangi so'rov kelganda avtomatik xabar yuboriladi.",
             "",
+            "<b>Login:</b>",
+            "1. /login — telefon raqamingizni yuboring",
+            "2. SMS dagi kodni yuboring",
+            "3. Panel ochiladi",
+            "",
             "<b>Bo'limlar:</b>",
             "💰 Pul so'rovlari — qaytarish va yechish",
             "📊 Statistika — dashboard va foydalanuvchilar",
@@ -272,8 +319,7 @@ async def show_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def handle_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await send_message(update, "ArenaTop ga login qilinmoqda...")
-    await begin_login(context.application)
+    await begin_login_for_user(update, context)
 
 
 CALLBACK_ROUTES = {
@@ -322,8 +368,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     data = update.callback_query.data if update.callback_query else ""
     logger.info("Callback: %s", data)
 
+    # Login / cancel process can run without full session for set:login
+    if data == "set:login":
+        await handle_login(update, context)
+        return
+
     try:
         if await process_callback_handler(update, context, data):
+            return
+
+        if not await require_login(update, context):
             return
 
         handler = CALLBACK_ROUTES.get(data)
@@ -353,7 +407,6 @@ async def menu_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def otp_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     settings = get_settings(context)
-    auth: AuthService = context.application.bot_data["auth"]
     user = update.effective_user
 
     if not update.message or not update.message.text:
@@ -366,28 +419,10 @@ async def otp_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     if has_pending(context):
         return
-    if not re.fullmatch(r"\d{4,6}", text):
+
+    if await handle_login_text(update, context):
         return
 
-    if not auth.awaiting_otp:
-        await update.message.reply_text(
-            "Hozir OTP kutilmayapti. Sozlamalar → Qayta login.",
-            reply_markup=MAIN_MENU,
-        )
+    if is_login_in_progress(context):
         return
 
-    await update.message.reply_text("Kod tekshirilmoqda...")
-
-    try:
-        await auth.verify_otp(text)
-    except AuthError as exc:
-        await update.message.reply_text(f"Login xatolik: {exc}", reply_markup=MAIN_MENU)
-        return
-
-    await update.message.reply_text(
-        "✅ ArenaTop ga muvaffaqiyatli kirdingiz!",
-        reply_markup=MAIN_MENU,
-    )
-    from bot.bootstrap import bootstrap_notifier
-
-    await bootstrap_notifier(context.application)
