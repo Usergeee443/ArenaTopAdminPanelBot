@@ -48,9 +48,8 @@ cp .env.example .env
 | O'zgaruvchi | Tavsif |
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | @BotFather dan olingan bot token |
-| `ADMIN_TELEGRAM_IDS` | Admin Telegram ID lari (vergul bilan) |
+| `ADMIN_TELEGRAM_IDS` | Ixtiyoriy Telegram ID ro'yxati; bo'sh bo'lsa istalgan moderator OTP orqali kiradi |
 | `ARENATOP_API_TOKEN` | ArenaTop API Bearer token (ixtiyoriy) |
-| `ARENATOP_PHONE` | Admin telefon raqami (default: `917079732`) |
 | `ARENATOP_API_BASE_URL` | API manzili (default: `https://api.arenatop.uz/v1`) |
 | `POLL_INTERVAL_SECONDS` | Tekshirish intervali (default: 60) |
 

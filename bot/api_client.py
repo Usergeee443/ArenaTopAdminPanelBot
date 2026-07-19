@@ -42,12 +42,25 @@ class ArenaTopClient:
             "Accept": "application/json",
         }
 
-    async def _request(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def _request(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        method: str = "GET",
+        json_body: dict[str, Any] | None = None,
+    ) -> Any:
         url = f"{self._base_url}{path}"
         headers = await self._auth_headers()
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, headers=headers, params=params)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.request(
+                method.upper(),
+                url,
+                headers=headers,
+                params=params,
+                json=json_body,
+            )
 
         if response.status_code == 401:
             await self._auth.invalidate(self._telegram_id)
@@ -61,8 +74,8 @@ class ArenaTopClient:
                 response.status_code,
             )
 
-        if not response.content:
-            return []
+        if response.status_code == 204 or not response.content:
+            return {}
         return response.json()
 
     @staticmethod
@@ -154,8 +167,13 @@ class ArenaTopClient:
         payload = await self._request("/users/summary")
         return payload if isinstance(payload, dict) else {}
 
-    async def get_my_statistics(self) -> dict[str, Any]:
-        payload = await self._request("/users/me/statistics")
+    async def get_my_statistics(
+        self, stats_date: str | None = None
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if stats_date:
+            params["stats_date"] = stats_date
+        payload = await self._request("/users/me/statistics", params=params or None)
         return payload if isinstance(payload, dict) else {}
 
     async def get_me(self) -> dict[str, Any]:
@@ -163,18 +181,121 @@ class ArenaTopClient:
         return payload if isinstance(payload, dict) else {}
 
     async def get_bookings(
-        self, status: str | None = None, limit: int = 20
+        self,
+        status: str | None = None,
+        limit: int = 20,
+        *,
+        from_date: str | None = None,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {"scope": "platform", "limit": limit}
+        params: dict[str, Any] = {
+            "scope": "platform",
+            "limit": limit,
+            "offset": offset,
+        }
         if status:
             params["status"] = status
+        if from_date:
+            params["from_date"] = from_date
         payload = await self._request("/bookings", params=params)
         return self._unwrap_items(payload)
 
-    async def get_courts(self, limit: int = 20) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {"scope": "all", "limit": limit}
+    async def get_courts(
+        self,
+        limit: int = 20,
+        *,
+        offset: int = 0,
+        moderator_approved: bool | None = None,
+        is_active: bool | None = None,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {
+            "scope": "all",
+            "limit": limit,
+            "offset": offset,
+        }
+        if moderator_approved is not None:
+            params["moderator_approved"] = moderator_approved
+        if is_active is not None:
+            params["is_active"] = is_active
         payload = await self._request("/courts", params=params)
         return self._unwrap_items(payload)
+
+    async def get_court(self, court_id: str) -> dict[str, Any]:
+        payload = await self._request(f"/courts/{court_id}")
+        return payload if isinstance(payload, dict) else {}
+
+    async def approve_court(self, court_id: str) -> dict[str, Any]:
+        payload = await self._request(
+            f"/lifecycle/court/{court_id}/activate",
+            method="POST",
+            json_body={},
+        )
+        return payload if isinstance(payload, dict) else {}
+
+    async def deactivate_court(self, court_id: str) -> dict[str, Any]:
+        payload = await self._request(
+            f"/courts/{court_id}",
+            method="PATCH",
+            json_body={"is_active": False},
+        )
+        return payload if isinstance(payload, dict) else {}
+
+    async def get_users(
+        self, *, limit: int = 100, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        payload = await self._request(
+            "/users", params={"limit": limit, "offset": offset}
+        )
+        return self._unwrap_items(payload)
+
+    async def get_court_reviews(
+        self, court_id: str, *, limit: int = 100, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        payload = await self._request(
+            f"/courts/{court_id}/reviews",
+            params={"limit": limit, "offset": offset},
+        )
+        return self._unwrap_items(payload)
+
+    async def iter_all_users(self, *, page_size: int = 100) -> list[dict[str, Any]]:
+        return await self._paginate(self.get_users, page_size=page_size)
+
+    async def iter_all_courts(self, *, page_size: int = 100) -> list[dict[str, Any]]:
+        return await self._paginate(self.get_courts, page_size=page_size)
+
+    async def iter_all_bookings(
+        self, *, from_date: str | None = None, page_size: int = 100
+    ) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            page = await self.get_bookings(
+                limit=page_size, offset=offset, from_date=from_date
+            )
+            if not page:
+                break
+            items.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+            if offset > 5000:
+                break
+        return items
+
+    async def _paginate(self, fetcher, *, page_size: int = 100) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            page = await fetcher(limit=page_size, offset=offset)
+            if not page:
+                break
+            items.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+            if offset > 5000:
+                break
+        return items
 
     async def health_check(self) -> str:
         payload = await self.get_me()

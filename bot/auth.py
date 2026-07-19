@@ -261,6 +261,36 @@ class AuthService:
         payload = response.json()
         return payload if isinstance(payload, dict) else {}
 
+    @staticmethod
+    def _is_moderator_profile(profile: dict[str, Any]) -> bool:
+        role = str(profile.get("role") or "").strip().lower()
+        role_ref = profile.get("role_ref")
+        if isinstance(role_ref, dict):
+            role = str(role_ref.get("slug") or role).strip().lower()
+
+        allowed_roles = {
+            "moderator",
+            "platform_moderator",
+            "platform",
+            "platform_admin",
+            "superadmin",
+            "super_admin",
+        }
+        if role in allowed_roles or "moderator" in role:
+            return True
+
+        permissions = profile.get("permissions")
+        if isinstance(permissions, list):
+            privileged = {
+                "courts.read",
+                "courts.write",
+                "withdrawals.read",
+                "refunds.read",
+                "users.read",
+            }
+            return bool(privileged.intersection(map(str, permissions)))
+        return False
+
     async def send_otp(self, phone_number: str) -> str:
         phone = normalize_phone(phone_number)
         payload = await self._post_json(
@@ -292,6 +322,8 @@ class AuthService:
         me = await self.fetch_me(access_token)
         if me.get("is_active") is False:
             raise AuthError("Bu akkaunt nofaol")
+        if not self._is_moderator_profile(me):
+            raise AuthError("Bu akkaunt moderator huquqiga ega emas")
 
         self._store_session(telegram_id, access_token, refresh_token, phone)
         session = self.get_session(telegram_id)
@@ -351,8 +383,8 @@ class AuthService:
 
     async def invalidate(self, telegram_id: int | None = None) -> None:
         if telegram_id is None:
-            self._sessions.clear()
-            self._save()
+            # An unbound background request must not log out every moderator.
+            logger.warning("Skipped global session invalidation")
             return
         self._sessions.pop(self._key(telegram_id), None)
         self._save()

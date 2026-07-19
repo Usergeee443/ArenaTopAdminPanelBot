@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 
+from bot.time_utils import month_label, recent_months
+
 # Reply keyboard — asosiy menyu
 MAIN_MENU = ReplyKeyboardMarkup(
     [
         ["💰 Pul so'rovlari", "📊 Statistika"],
         ["📋 Bronlar", "🏟 Maydonlar"],
-        ["👤 Profil", "⚙️ Sozlamalar"],
+        ["👤 Profil / Sozlamalar"],
     ],
     resize_keyboard=True,
 )
@@ -16,6 +18,8 @@ BTN_PAYMENTS = "💰 Pul so'rovlari"
 BTN_STATS = "📊 Statistika"
 BTN_BOOKINGS = "📋 Bronlar"
 BTN_COURTS = "🏟 Maydonlar"
+BTN_PROFILE_SETTINGS = "👤 Profil / Sozlamalar"
+# Backward-compatible aliases for older reply keyboards still on client devices
 BTN_PROFILE = "👤 Profil"
 BTN_SETTINGS = "⚙️ Sozlamalar"
 
@@ -24,6 +28,7 @@ MENU_BUTTONS = {
     BTN_STATS,
     BTN_BOOKINGS,
     BTN_COURTS,
+    BTN_PROFILE_SETTINGS,
     BTN_PROFILE,
     BTN_SETTINGS,
 }
@@ -53,9 +58,30 @@ def stats_menu_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton("📈 Dashboard", callback_data="stats:dashboard")],
             [InlineKeyboardButton("👥 Foydalanuvchilar", callback_data="stats:users")],
             [InlineKeyboardButton("📅 Bugungi daromad", callback_data="stats:today")],
+            [InlineKeyboardButton("🗓 Oylik statistika", callback_data="stats:months")],
             back_button(),
         ]
     )
+
+
+def months_menu_keyboard() -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for year, month in recent_months(12):
+        label = month_label(year, month)
+        row.append(
+            InlineKeyboardButton(
+                label,
+                callback_data=f"stats:month:{year:04d}-{month:02d}",
+            )
+        )
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append(back_button("menu:stats"))
+    return InlineKeyboardMarkup(rows)
 
 
 def bookings_menu_keyboard() -> InlineKeyboardMarkup:
@@ -78,10 +104,86 @@ def bookings_menu_keyboard() -> InlineKeyboardMarkup:
 def settings_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton("👤 Profil", callback_data="set:profile")],
             [InlineKeyboardButton("🤖 Bot holati", callback_data="set:status")],
             [InlineKeyboardButton("🔐 Qayta login", callback_data="set:login")],
             [InlineKeyboardButton("❓ Yordam", callback_data="set:help")],
             back_button(),
+        ]
+    )
+
+
+def courts_list_keyboard(items: list[dict]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for item in items[:25]:
+        court_id = item.get("id")
+        if not court_id:
+            continue
+        name = str(item.get("name") or "Maydon")[:28]
+        if not item.get("moderator_approved"):
+            prefix = "⏳ "
+        elif item.get("is_active", True):
+            prefix = "✅ "
+        else:
+            prefix = "⛔ "
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    f"{prefix}{name}",
+                    callback_data=f"court:view:{court_id}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton("🔄 Yangilash", callback_data="menu:courts")])
+    rows.append(back_button())
+    return InlineKeyboardMarkup(rows)
+
+
+def court_details_keyboard(
+    court_id: str,
+    *,
+    approved: bool,
+    active: bool,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if not approved:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    "✅ Tasdiqlash",
+                    callback_data=f"court:approve:{court_id}",
+                )
+            ]
+        )
+    if active:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    "⛔ O'chirish (nofaol)",
+                    callback_data=f"court:deactivate:{court_id}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton("🔄 Yangilash", callback_data=f"court:view:{court_id}")])
+    rows.append(back_button("menu:courts"))
+    return InlineKeyboardMarkup(rows)
+
+
+def court_confirm_keyboard(action: str, court_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "✅ Ha",
+                    callback_data=f"court:confirm:{action}:{court_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "❌ Yo'q",
+                    callback_data=f"court:view:{court_id}",
+                )
+            ],
         ]
     )
 

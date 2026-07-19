@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from telegram.ext import Application
 
@@ -14,7 +16,9 @@ from bot.formatters import (
     format_summary,
 )
 from bot.keyboards import refund_actions_keyboard, withdrawal_actions_keyboard
+from bot.period_stats import collect_day_stats
 from bot.process_flow import is_pending_refund, is_pending_withdrawal
+from bot.stats_formatters import format_period_stats
 from bot.storage import SeenStorage
 
 logger = logging.getLogger(__name__)
@@ -144,6 +148,43 @@ class PaymentNotifier:
         )
         return refund_text, withdrawal_text
 
+    def _report_tz(self) -> ZoneInfo:
+        try:
+            return ZoneInfo(self._settings.report_timezone)
+        except Exception:
+            logger.warning(
+                "Invalid REPORT_TIMEZONE=%s, falling back to Asia/Tashkent",
+                self._settings.report_timezone,
+            )
+            return ZoneInfo("Asia/Tashkent")
+
+    def _seconds_until_daily_report(self) -> float:
+        tz = self._report_tz()
+        now = datetime.now(tz)
+        target = datetime.combine(
+            now.date(),
+            time(
+                self._settings.daily_report_hour,
+                self._settings.daily_report_minute,
+            ),
+            tzinfo=tz,
+        )
+        if now >= target:
+            target += timedelta(days=1)
+        return max(1.0, (target - now).total_seconds())
+
+    async def send_daily_stats_report(self, application: Application) -> None:
+        tz = self._report_tz()
+        report_day = (datetime.now(tz) - timedelta(days=1)).date()
+        stats = await collect_day_stats(self._api, report_day)
+        text = (
+            "🌙 <b>Kunlik hisobot</b>\n"
+            f"Davr: kechagi kun ({stats.label})\n\n"
+            + format_period_stats(stats)
+        )
+        await self._notify_admins(application, text)
+        logger.info("Daily stats report sent for %s", report_day.isoformat())
+
     async def run_polling_loop(self, application: Application) -> None:
         while True:
             try:
@@ -164,3 +205,17 @@ class PaymentNotifier:
                 logger.exception("Unexpected polling error")
 
             await asyncio.sleep(self._settings.poll_interval_seconds)
+
+    async def run_daily_report_loop(self, application: Application) -> None:
+        while True:
+            delay = self._seconds_until_daily_report()
+            logger.info("Next daily stats report in %.0f seconds", delay)
+            await asyncio.sleep(delay)
+            try:
+                await self.send_daily_stats_report(application)
+            except ArenaTopAPIError as exc:
+                logger.error("API error during daily report: %s", exc)
+            except Exception:
+                logger.exception("Unexpected daily report error")
+            # Avoid double-send if the job finishes in under a minute.
+            await asyncio.sleep(60)

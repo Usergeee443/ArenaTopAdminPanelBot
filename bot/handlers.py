@@ -31,7 +31,7 @@ from bot.menu import (
 )
 from bot.notifier import PaymentNotifier
 from bot.process_flow import has_pending, submit_receipt
-from bot.ui_utils import can_access_bot, is_logged_in
+from bot.ui_utils import bind_user, can_access_bot, is_logged_in
 
 logger = logging.getLogger(__name__)
 
@@ -129,4 +129,5 @@ async def receipt_handler(update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not user or not is_logged_in(user.id, context):
         return
     if has_pending(context):
+        bind_user(context, user.id)
         await submit_receipt(update, context)

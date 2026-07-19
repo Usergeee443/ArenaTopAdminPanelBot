@@ -13,6 +13,7 @@ from bot.formatters import (
     format_summary,
     format_withdrawal_message,
 )
+from bot.period_stats import PeriodStats
 
 
 def _money(value: Any) -> str:
@@ -198,13 +199,58 @@ def format_courts_list(items: list[dict[str, Any]]) -> str:
     if not items:
         return "🏟 <b>Maydonlar</b>\n\nMaydonlar topilmadi."
 
-    lines = ["🏟 <b>Maydonlar</b>", f"Jami: {len(items)} ta", ""]
-    for index, item in enumerate(items[:10], start=1):
-        lines.append(f"{index}. {format_court_item(item)}")
-
-    if len(items) > 10:
-        lines.append(f"\n... va yana {len(items) - 10} ta maydon")
+    pending = sum(1 for item in items if not item.get("moderator_approved"))
+    active = sum(1 for item in items if item.get("is_active", True))
+    lines = [
+        "🏟 <b>Maydonlar</b>",
+        f"Jami: <b>{len(items)}</b> | Kutilmoqda: <b>{pending}</b> | Faol: <b>{active}</b>",
+        "",
+        "Maydonni tanlang 👇",
+    ]
     return "\n".join(lines)
+
+
+def format_court_details(data: dict[str, Any]) -> str:
+    category = data.get("category")
+    if isinstance(category, dict):
+        category_name = category.get("name") or "—"
+    else:
+        category_name = "—"
+
+    approved = "✅ Tasdiqlangan" if data.get("moderator_approved") else "⏳ Kutilmoqda"
+    active = "✅ Faol" if data.get("is_active", True) else "⛔ Nofaol"
+    created = extract_created_at(data)
+
+    return "\n".join(
+        [
+            f"🏟 <b>{data.get('name', 'Maydon')}</b>",
+            "",
+            f"📍 Manzil: {data.get('location_name') or '—'}",
+            f"🏷 Kategoriya: {category_name}",
+            f"💰 Narx: {_money(data.get('price_per_hour'))}/soat",
+            f"🕒 Ish vaqti: {data.get('work_time') or '—'}",
+            f"⭐ Reyting: {data.get('rating', 0)} ({_int(data.get('rating_count'))} sharh)",
+            f"📌 Holat: {active}",
+            f"🛡 Moderatsiya: {approved}",
+            f"🗓 Yaratilgan: {created}",
+            f"🆔 <code>{data.get('id', '—')}</code>",
+        ]
+    )
+
+
+def format_period_stats(stats: PeriodStats) -> str:
+    return "\n".join(
+        [
+            f"📊 <b>{stats.label} statistikasi</b>",
+            "",
+            f"👥 Yangi foydalanuvchilar: <b>{_int(stats.new_users)}</b>",
+            f"🏟 Yangi maydonlar: <b>{_int(stats.new_courts)}</b>",
+            f"📋 Jami bronlar: <b>{_int(stats.total_bookings)}</b>",
+            f"💳 To'langan bronlar: <b>{_int(stats.paid_bookings)}</b>",
+            f"💰 Daromad: <b>{_money(stats.revenue)}</b>",
+            f"⭐ Yangi sharhlar: <b>{_int(stats.new_reviews)}</b>",
+        ]
+    )
 
 
 def format_refunds_list(items: list[dict[str, Any]], title: str) -> str:

@@ -26,3 +26,12 @@ async def bootstrap_notifier(application: Application) -> None:
         settings.poll_interval_seconds,
     )
     asyncio.create_task(notifier.run_polling_loop(application))
+    if not application.bot_data.get("daily_report_started"):
+        application.bot_data["daily_report_started"] = True
+        logger.info(
+            "Daily stats report scheduled at %02d:%02d %s",
+            settings.daily_report_hour,
+            settings.daily_report_minute,
+            settings.report_timezone,
+        )
+        asyncio.create_task(notifier.run_daily_report_loop(application))

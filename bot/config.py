@@ -48,6 +48,9 @@ class Settings:
     withdrawal_statuses: list[str]
     storage_path: str
     auth_storage_path: str
+    report_timezone: str
+    daily_report_hour: int
+    daily_report_minute: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -68,6 +71,14 @@ class Settings:
         if poll_interval < 15:
             poll_interval = 15
 
+        report_timezone = os.getenv("REPORT_TIMEZONE", "Asia/Tashkent").strip()
+        daily_report_hour = int(os.getenv("DAILY_REPORT_HOUR", "0"))
+        daily_report_minute = int(os.getenv("DAILY_REPORT_MINUTE", "0"))
+        if not 0 <= daily_report_hour <= 23:
+            daily_report_hour = 0
+        if not 0 <= daily_report_minute <= 59:
+            daily_report_minute = 0
+
         return cls(
             telegram_bot_token=token,
             admin_telegram_ids=admin_ids,
@@ -84,4 +95,7 @@ class Settings:
             auth_storage_path=os.getenv(
                 "AUTH_STORAGE_PATH", "data/auth_sessions.json"
             ),
+            report_timezone=report_timezone or "Asia/Tashkent",
+            daily_report_hour=daily_report_hour,
+            daily_report_minute=daily_report_minute,
         )
